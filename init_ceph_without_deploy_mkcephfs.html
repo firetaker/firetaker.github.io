@@ -1,0 +1,77 @@
+1. uuidgen
+2.init cluster and mon daemon
+mkdir -p /data/mon/mon.0
+ceph-authtool --create-keyring /tmp/ceph.mon.keyring --gen-key -n mon. --cap mon 'allow *'
+ceph-authtool --create-keyring /etc/ceph/ceph.client.admin.keyring --gen-key -n client.admin --set-uid=0 --cap mon 'allow *' --cap osd 'allow *' --cap mds 'allow *'
+ceph-authtool /tmp/ceph.mon.keyring --import-keyring /etc/ceph/ceph.client.admin.keyring
+monmaptool --create --add 0 127.0.0.1 --fsid a7f64266-0894-4f1e-a635-d0aeaca0e993 /tmp/monmap
+ceph-mon -i 0 -c /etc/ceph/ceph.conf --mkfs  --monmap /tmp/monmap --keyring /tmp/ceph.mon.keyring  --mon-data /data/mon/mon.0 --debug_mon 10 --fsid=a7f64266-0894-4f1e-a635-d0aeaca0e993
+
+ceph-mon -i 0
+
+3.add two osd daemon
+ceph osd create
+mkdir -p /data/osd/osd.0 
+mkfs.xfs -f /dev/vdb
+mount -t xfs /dev/vdb /data/osd/osd.0 
+ceph-osd -i 0 --mkfs --osd-data=/data/osd/osd.0 -c /etc/ceph/ceph.conf --debug_osd 20 --mkkey
+ceph auth add osd.0 osd 'allow *' mon 'allow rwx' -i /data/osd/osd.0/keyring 
+ceph-osd -i 0
+
+ceph osd create
+mkdir -p /data/osd/osd.1 
+mkfs.xfs -f /dev/vdc
+mount -t xfs /dev/vdc /data/osd/osd.1
+ceph-osd -i 1 --mkfs --osd-data=/data/osd/osd.1 -c /etc/ceph/ceph.conf --debug_osd 20 --mkkey
+ceph auth add osd.1 osd 'allow *' mon 'allow rwx' -i /data/osd/osd.1/keyring 
+ceph-osd -i 1
+
+4.build crush tree
+ceph osd crush add-bucket unkownrack rack 
+ceph osd tree 
+ceph osd crush  add-bucket host0 host 
+ceph osd crush  add-bucket host1 host 
+ceph osd crush move host0 rack=unkownrack 
+ceph osd crush move host1 rack=unkownrack 
+ceph osd crush move unkownrack  root=default 
+ceph osd crush create-or-move osd.0 1.0 host=host0 rack=unkownrack root=default
+ceph osd crush create-or-move osd.1 1.0 host=host1 rack=unkownrack root=default
+
+5. ps : ceph.conf 
+[global]
+    max open files = 131072
+    log file = /var/log/ceph/ceph-$name.log
+    pid file = /var/run/ceph/$name.pid     
+    auth cluster required = cephx
+    service required = cephx
+    auth client required = cephx
+    osd pool default size = 1    
+
+[mon]
+    debug mon = 0
+    debug paxos = 0 
+    mon data = /data/mon/mon.$id
+
+[mon.0]  
+    host = 127.0.0.1 
+    mon addr = 127.0.0.1:6789 
+
+[osd] 
+    osd data = /data/osd/osd.$id
+    osd journal = /data/osd/osd.$id/journal
+    osd journal size = 1000
+    osd mkfs type = xfs
+    osd mkfs options xfs = -f                  
+    osd mount options xfs = rw,noatime 
+    debug osd = 0
+
+[osd.0] 
+    host = 127.0.0.1
+    devs = /dev/vdb
+
+[osd.1] 
+    host = 127.0.0.1
+    devs = /dev/vdc
+
+[client]
+    debug client = 10 
